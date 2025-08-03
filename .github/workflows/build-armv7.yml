@@ -74,14 +74,23 @@ jobs:
         run: |
           cmake --build build --config MinSizeRel -j$(nproc)
 
-      - name: Inspect and compress binary
+      - name: List built binaries
         run: |
-          file build/bin/main
-          strip build/bin/main
-          upx --best --lzma build/bin/main || echo "UPX compression skipped"
+          ls -lh build/bin || echo "No binaries built"
 
-      - name: Upload ARMv7 musl static binary
+      - name: Strip and compress all binaries
+        run: |
+          for bin in build/bin/*; do
+            if [ -x "$bin" ]; then
+              echo "Processing: $bin"
+              file "$bin"
+              strip "$bin" || echo "Skipping strip for $bin"
+              upx --best --lzma "$bin" || echo "UPX compression skipped for $bin"
+            fi
+          done
+
+      - name: Upload all ARMv7 musl static binaries
         uses: actions/upload-artifact@v4
         with:
-          name: llama-main-armv7-musl-static
-          path: build/bin/main
+          name: llama-armv7-musl-static-binaries
+          path: build/bin/*
