@@ -1,11 +1,11 @@
-name: Cross-Compile llama.cpp for ARMv7 (musl)
+name: Cross-Compile llama.cpp for ARMv7 (musl, static)
 
 on:
   workflow_dispatch:
 
 jobs:
   build-armv7-musl:
-    name: ARMv7 (musl) Static Cross-Compile
+    name: ARMv7 (musl) Static Build
     runs-on: ubuntu-22.04
 
     steps:
@@ -32,7 +32,8 @@ jobs:
             help2man \
             libtool \
             automake \
-            autoconf
+            autoconf \
+            upx
 
       - name: Clone and build musl-cross-make (ARMv7)
         run: |
@@ -45,7 +46,7 @@ jobs:
           make -j$(nproc)
           sudo make install
 
-      - name: Configure llama.cpp for cross-compiling with musl
+      - name: Configure llama.cpp for ARMv7 musl static build
         run: |
           export PATH="/opt/musl-cross/bin:$PATH"
           export CC=armv7-linux-musleabihf-gcc
@@ -66,14 +67,20 @@ jobs:
             -DLLAMA_BUILD_TOOLS=ON \
             -DLLAMA_CURL=OFF \
             -DGGML_OPENMP=OFF \
+            -DBUILD_SHARED_LIBS=OFF \
             -DCMAKE_EXE_LINKER_FLAGS="-static"
 
-      - name: Build statically linked ARMv7 binary
+      - name: Build llama.cpp for ARMv7
         run: |
           cmake --build build --config MinSizeRel -j$(nproc)
-          file build/bin/main || true
 
-      - name: Upload statically linked binary
+      - name: Inspect and compress binary
+        run: |
+          file build/bin/main
+          strip build/bin/main
+          upx --best --lzma build/bin/main || echo "UPX compression skipped"
+
+      - name: Upload ARMv7 musl static binary
         uses: actions/upload-artifact@v4
         with:
           name: llama-main-armv7-musl-static
