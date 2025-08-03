@@ -1,0 +1,80 @@
+name: Cross-Compile llama.cpp for ARMv7 (musl)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-armv7-musl:
+    name: ARMv7 (musl) Static Cross-Compile
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout llama.cpp
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            cmake \
+            ninja-build \
+            git \
+            curl \
+            wget \
+            file \
+            zip \
+            python3 \
+            gawk \
+            bison \
+            flex \
+            texinfo \
+            help2man \
+            libtool \
+            automake \
+            autoconf
+
+      - name: Clone and build musl-cross-make (ARMv7)
+        run: |
+          git clone https://github.com/richfelker/musl-cross-make
+          cd musl-cross-make
+
+          echo "TARGET = armv7-linux-musleabihf" >> config.mak
+          echo "OUTPUT = /opt/musl-cross" >> config.mak
+
+          make -j$(nproc)
+          sudo make install
+
+      - name: Configure llama.cpp for cross-compiling with musl
+        run: |
+          export PATH="/opt/musl-cross/bin:$PATH"
+          export CC=armv7-linux-musleabihf-gcc
+          export CXX=armv7-linux-musleabihf-g++
+
+          cmake -B build -G Ninja \
+            -DCMAKE_SYSTEM_NAME=Linux \
+            -DCMAKE_SYSTEM_PROCESSOR=armv7 \
+            -DCMAKE_C_COMPILER=${CC} \
+            -DCMAKE_CXX_COMPILER=${CXX} \
+            -DCMAKE_FIND_ROOT_PATH=/opt/musl-cross/armv7-linux-musleabihf \
+            -DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER \
+            -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY \
+            -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY \
+            -DCMAKE_BUILD_TYPE=MinSizeRel \
+            -DLLAMA_BUILD_TESTS=OFF \
+            -DLLAMA_BUILD_EXAMPLES=ON \
+            -DLLAMA_BUILD_TOOLS=ON \
+            -DLLAMA_CURL=OFF \
+            -DGGML_OPENMP=OFF \
+            -DCMAKE_EXE_LINKER_FLAGS="-static"
+
+      - name: Build statically linked ARMv7 binary
+        run: |
+          cmake --build build --config MinSizeRel -j$(nproc)
+          file build/bin/main || true
+
+      - name: Upload statically linked binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: llama-main-armv7-musl-static
+          path: build/bin/main
