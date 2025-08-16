@@ -1,0 +1,96 @@
+name: Cross-Compile llama.cpp for ARM64 (musl, static)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-arm64-musl:
+    name: ARM64 (musl) Static Build
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout llama.cpp
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            cmake \
+            ninja-build \
+            git \
+            curl \
+            wget \
+            file \
+            zip \
+            python3 \
+            gawk \
+            bison \
+            flex \
+            texinfo \
+            help2man \
+            libtool \
+            automake \
+            autoconf \
+            upx
+
+      - name: Clone and build musl-cross-make (ARM64)
+        run: |
+          git clone https://github.com/richfelker/musl-cross-make
+          cd musl-cross-make
+
+          echo "TARGET = aarch64-linux-musl" >> config.mak
+          echo "OUTPUT = /opt/musl-cross" >> config.mak
+
+          make -j$(nproc)
+          sudo make install
+
+      - name: Configure llama.cpp for ARM64 musl static build
+        run: |
+          export PATH="/opt/musl-cross/bin:$PATH"
+          export CC=aarch64-linux-musl-gcc
+          export CXX=aarch64-linux-musl-g++
+
+          cmake -B build -G Ninja \
+            -DCMAKE_SYSTEM_NAME=Linux \
+            -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
+            -DCMAKE_C_COMPILER=${CC} \
+            -DCMAKE_CXX_COMPILER=${CXX} \
+            -DCMAKE_FIND_ROOT_PATH=/opt/musl-cross/aarch64-linux-musl \
+            -DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER \
+            -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY \
+            -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY \
+            -DCMAKE_BUILD_TYPE=MinSizeRel \
+            -DLLAMA_BUILD_TESTS=OFF \
+            -DLLAMA_BUILD_EXAMPLES=ON \
+            -DLLAMA_BUILD_TOOLS=ON \
+            -DLLAMA_CURL=OFF \
+            -DGGML_OPENMP=OFF \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DCMAKE_EXE_LINKER_FLAGS="-static"
+
+      - name: Build llama.cpp for ARM64
+        run: |
+          cmake --build build --config MinSizeRel -j$(nproc)
+
+      - name: List built binaries
+        run: |
+          ls -lh build/bin || echo "No binaries built"
+
+      - name: Strip and compress all binaries
+        run: |
+          for bin in build/bin/*; do
+            if [ -x "$bin" ]; then
+              echo "Processing: $bin"
+              file "$bin"
+              strip "$bin" || echo "Skipping strip for $bin"
+              upx --best --lzma "$bin" || echo "UPX compression skipped for $bin"
+            fi
+          done
+
+      - name: Upload all ARM64 musl static binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: llama-arm64-musl-static-binaries
+          path: build/bin/*
